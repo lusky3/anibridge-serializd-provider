@@ -91,11 +91,16 @@ Simkl's `resolve_media_id` call).
   the diary/review log (see below) — they are a separate write path from
   reviews.
 
-**Ratings/reviews write** (undocumented, live-verified):
-- `POST /api/show/reviews/add` — `{showId, seasonId (nullable), rating
-  (0–10), reviewText, like (bool), ...}`. Also creates a diary entry and, for
-  `seasonId: null` ("All Seasons"), marks every episode of the show watched
-  (equivalent to `log_show`).
+**Ratings/reviews write** (undocumented, live-verified — request body
+captured directly from the browser, not inferred from the response echo):
+- `POST /api/show/reviews/add` — request body is **snake_case** (the
+  response echoes back camelCase field names — a real inconsistency between
+  the two, not a typo): `{show_id, season_id (nullable), rating (0–10),
+  review_text, contains_spoiler, backdate (ISO datetime), is_log,
+  is_rewatch, episode_number (nullable), tags: [], allows_comments, like}`.
+  Also creates a diary entry when `is_log: true`, and for `season_id: null`
+  ("All Seasons") marks every episode of the show watched (equivalent to
+  `log_show`).
 
 **Per-user reads** (undocumented, live-verified — this is what makes
 partial bidirectional sync possible):
