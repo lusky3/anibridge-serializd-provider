@@ -33,6 +33,11 @@ APP_ID = "serializd_vercel"
 class SerializdAPIError(Exception):
     """Raised when the Serializd API returns an error response."""
 
+    def __init__(self, message: str, *, status_code: int) -> None:
+        """Construct the error with the HTTP status code that caused it."""
+        super().__init__(message)
+        self.status_code = status_code
+
 
 def _default_headers(token: str | None) -> dict[str, str]:
     """Return the headers every Serializd request must carry.
@@ -132,7 +137,8 @@ class SerializdClient:
             if response.status >= 400:
                 text = await response.text()
                 raise SerializdAPIError(
-                    f"{method} {path} returned {response.status}: {text}"
+                    f"{method} {path} returned {response.status}: {text}",
+                    status_code=response.status,
                 )
 
             if response.status == 204:

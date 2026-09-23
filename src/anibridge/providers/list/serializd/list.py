@@ -16,9 +16,9 @@ from anibridge.list import (
 )
 from anibridge.utils.types import MappingDescriptor, ProviderLogger
 
-from anibridge.providers.list.serializd.client import SerializdClient
+from anibridge.providers.list.serializd.client import SerializdAPIError, SerializdClient
 from anibridge.providers.list.serializd.config import SerializdListProviderConfig
-from anibridge.providers.list.serializd.models import ShowDetail
+from anibridge.providers.list.serializd.models import SeasonSummary, ShowDetail
 from anibridge.providers.list.serializd.progress import (
     DiaryIndex,
     derive_progress_and_status,
@@ -27,9 +27,21 @@ from anibridge.providers.list.serializd.progress import (
 __all__ = ["SerializdListEntry", "SerializdListMedia", "SerializdListProvider"]
 
 
+def _ordered_seasons(show: ShowDetail) -> list[SeasonSummary]:
+    """Return the show's non-special seasons, sorted by season number.
+
+    Excludes TMDB "Specials" (`seasonNumber == 0`), which are not part of
+    normal episode-count/progress math.
+    """
+    return sorted(
+        (season for season in show.seasons if season.seasonNumber != 0),
+        key=lambda season: season.seasonNumber,
+    )
+
+
 def _total_episodes(show: ShowDetail) -> int | None:
-    """Sum episode counts across all seasons, or None if unknown."""
-    total = sum(season.episodeCount for season in show.seasons)
+    """Sum episode counts across all non-special seasons, or None if unknown."""
+    total = sum(season.episodeCount for season in _ordered_seasons(show))
     return total or None
 
 
@@ -55,7 +67,7 @@ class SerializdListMedia(ListMedia["SerializdListProvider"]):
 
     @property
     def total_units(self) -> int | None:
-        """Total episode count across all seasons."""
+        """Total episode count across all non-special seasons."""
         return _total_episodes(self._show)
 
 
@@ -80,6 +92,7 @@ class SerializdListEntry(ListEntry["SerializdListProvider"]):
         self._title = show.name
 
         self._progress = progress
+        self._original_progress = progress
         self._status = status
         self._rating = rating
         self._review_text = review_text
@@ -247,28 +260,45 @@ class SerializdListProvider(ListProvider):
     async def get_entry(self, key: str) -> SerializdListEntry | None:
         """Fetch a single entry, deriving progress/status per the spec.
 
-        The diary index is only consulted when the next-unwatched-episode
-        pointer is null (the ambiguous case) - the common partial-progress
-        path never pays the diary-pagination cost.
+        Only returns None when the show does not exist on Serializd/TMDB (a
+        404 from `get_show`), per the `ListProvider.get_entry` contract. A
+        show that exists but was never touched still returns an entry, with
+        `status=None` and `progress=None` - callers must not treat that the
+        same as "does not exist".
+
+        The diary index is consulted on every call (not just when the
+        next-unwatched-episode pointer is null) because it is also the only
+        source for the show's latest rating/review text; the pagination
+        cost is only paid once per session since the index is cached.
         """
         show_id = int(key)
-        show = await self._client.get_show(show_id)
+        try:
+            show = await self._client.get_show(show_id)
+        except SerializdAPIError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+
         next_episode = await self._client.get_show_progress(show_id)
 
-        has_diary_entry = False
-        if next_episode is None:
-            assert self._diary_index is not None
-            has_diary_entry = await self._diary_index.contains(show_id)
+        assert self._diary_index is not None
+        latest_entry = await self._diary_index.latest_entry(show_id)
 
         progress, status = derive_progress_and_status(
             total_episodes=_total_episodes(show),
             next_episode=next_episode,
-            has_diary_entry=has_diary_entry,
+            ordered_seasons=_ordered_seasons(show),
+            has_diary_entry=latest_entry is not None,
         )
-        if status is None:
-            return None
 
-        return SerializdListEntry(self, show, progress=progress, status=status)
+        return SerializdListEntry(
+            self,
+            show,
+            progress=progress,
+            status=status,
+            rating=latest_entry.rating if latest_entry is not None else None,
+            review_text=(latest_entry.reviewText if latest_entry is not None else None),
+        )
 
     async def update_entry(
         self, key: str, entry: ListEntry
@@ -282,15 +312,49 @@ class SerializdListProvider(ListProvider):
 
         show_id = int(key)
         show = serializd_entry._show
+        ordered_seasons = _ordered_seasons(show)
+        is_full_completion = False
 
         if "progress" in changed_fields and serializd_entry.progress is not None:
             total = _total_episodes(show) or 0
             target_progress = min(serializd_entry.progress, total)
+            original_progress = serializd_entry._original_progress or 0
+
             if total > 0 and target_progress >= total:
-                await self._client.log_show(show_id)
+                # season_id: null + is_log: true marks every episode of the
+                # show watched (equivalent to log_show) AND creates a diary
+                # entry, so the next get_entry sees the completion trace
+                # instead of immediately "forgetting" it (C3).
+                is_full_completion = True
+                await self._client.add_review(
+                    show_id,
+                    season_id=None,
+                    rating=serializd_entry._rating,
+                    review_text=serializd_entry._review_text or "",
+                    add_to_diary=True,
+                )
+            elif target_progress < original_progress:
+                # Progress moved backwards: unlog the shrinking range so
+                # Serializd's state actually reflects the decrease, instead
+                # of only ever logging forward (I4).
+                running_total = 0
+                for season in ordered_seasons:
+                    season_start = running_total
+                    running_total += season.episodeCount
+                    season_end = running_total
+                    lo = max(season_start, target_progress)
+                    hi = min(season_end, original_progress)
+                    if hi > lo:
+                        first_episode = lo - season_start + 1
+                        last_episode = hi - season_start
+                        await self._client.unlog_episodes(
+                            show_id,
+                            season.seasonId,
+                            list(range(first_episode, last_episode + 1)),
+                        )
             else:
                 remaining = target_progress
-                for season in show.seasons:
+                for season in ordered_seasons:
                     if remaining <= 0:
                         break
                     take = min(remaining, season.episodeCount)
@@ -300,7 +364,12 @@ class SerializdListProvider(ListProvider):
                         )
                     remaining -= take
 
-        if "user_rating" in changed_fields or "review" in changed_fields:
+        if (
+            "user_rating" in changed_fields or "review" in changed_fields
+        ) and not is_full_completion:
+            # When completion already routed through add_review above, that
+            # call already carried the current rating/review - a second
+            # call here would create a duplicate diary/review entry.
             await self._client.add_review(
                 show_id,
                 rating=serializd_entry._rating,

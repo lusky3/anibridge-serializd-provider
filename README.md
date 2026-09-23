@@ -28,3 +28,9 @@ providers:
   with zero diary/review entries ever created for it, is indistinguishable
   from a show that was never started.** No Serializd API distinguishes the
   two cases. This provider reports such a show as absent.
+- **Deleting an entry does not clear its diary/review trace.** `delete_entry`
+  unmarks the show's seasons as watched, but there is no verified Serializd
+  API to remove a diary/review entry. If the show had one (e.g. it was ever
+  marked fully complete), the next read will still find that diary entry
+  and report the show as `COMPLETED` again. This is a known, accepted gap
+  rather than a silently-guessed-at "fix."
