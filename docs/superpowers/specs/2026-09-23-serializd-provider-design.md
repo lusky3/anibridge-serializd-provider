@@ -151,20 +151,46 @@ src/anibridge/providers/list/serializd/
     models.py     # response/request msgspec structs
 ```
 
-Toolchain: `uv`, Python 3.14, `ruff` (lint+format), `pytest` +
-`pytest-asyncio` (`asyncio_mode = "auto"`) + `pytest-cov`, `msgspec` for
-config/response structs — same as `anibridge-anidb-provider`.
+Toolchain (**corrected against live inspection of `anibridge-mal-provider`,
+`anibridge-anilist-provider`, `anibridge-simkl-provider`, and
+`anibridge-trakt-provider`'s actual `pyproject.toml`/source — every sibling
+provider agrees, unanimously, on the choices below**): `uv` with the
+`uv_build` backend (`[tool.uv.build-backend] module-name = "anibridge",
+namespace = true` — required for this package to install correctly
+alongside sibling providers under the shared `anibridge` namespace package),
+Python 3.14, `ruff` (line-length 88, `select = ["B", "D", "DOC", "E", "F",
+"I", "RUF", "SIM", "UP", "W"]`, Google docstring convention, `D` ignored
+under `tests/**`), `pytest` + `pytest-asyncio` (`asyncio_mode = "auto"`,
+`pythonpath = ["src"]`, `addopts = "--cov=src"`) + `pytest-cov`, `ty` for
+type checking, `msgspec` for config/response structs. Dependencies:
+`aiohttp>=3.13.3`, `anibridge-list-base>=0.2.0`, `anibridge-utils>=0.2.0`
+(shared `ProviderLogger` protocol, `MappingDescriptor` type alias, and
+`Limiter` rate-limiter helper), `msgspec>=0.21.1`.
 
-**Client layer** (`client.py`): own async `httpx.AsyncClient`-based client,
-**not** a dependency on `serializd-py`. Rationale: `serializd-py`'s client is
-synchronous (`httpx.Client`), which fights AniBridge's async provider model,
-and covers well under half of the endpoints this provider needs. A single
-`_request` method is the one real-network seam (same pattern as the AniDB
-provider's `_send_raw`), making the client fully unit-testable via a mocked
-transport fixture. Public methods: `login`, `validate_token`, `search_shows`,
-`get_show`, `get_season`, `log_show`/`unlog_show`, `log_seasons`/
-`unlog_seasons`, `log_episodes`/`unlog_episodes`, `add_review`,
-`get_show_progress`, `get_user_diary`, `get_profile_stats`.
+**Client layer** (`client.py`): own async **`aiohttp.ClientSession`-based**
+client (corrected from an earlier `httpx` assumption — every sibling
+provider, including the one other project that also targets
+`anibridge-list-base`'s newer sibling contract, uses `aiohttp`, never
+`httpx`; matching this matters for consistency and for reusing
+`anibridge-utils`' aiohttp-oriented `Limiter`), **not** a dependency on
+`serializd-py` (whose client is sync `httpx.Client` and covers well under
+half of what's needed). A single `_make_request` method is the one
+real-network seam (same pattern as `MalClient._make_request` and the AniDB
+provider's `_send_raw`), making the client fully unit-testable via a stub
+`aiohttp.ClientSession`/response fixture. Public methods: `login`,
+`validate_token`, `search_shows`, `get_show`, `get_season`,
+`log_show`/`unlog_show`, `log_seasons`/`unlog_seasons`,
+`log_episodes`/`unlog_episodes`, `add_review`, `get_show_progress`,
+`get_user_diary`, `get_profile_stats`.
+
+**`ListEntry` write pattern** (matching the verified `MalListEntry`
+convention exactly, so `update_entry` only sends what actually changed): a
+`_changed_fields: set[str]` populated by each property setter;
+`ListProvider.update_entry` reads this set, sends only the corresponding
+API calls, and clears it afterward. `ListMedia`/`ListEntry` subclasses set
+`self._provider`/`self._key`/`self._title` directly in `__init__` (the
+`ListEntity` base is a slotted dataclass; subclasses assign to those slots
+rather than calling `super().__init__()`).
 
 **Data mapping:**
 - `ListMedia.total_units` = episode count summed from catalog season list.
