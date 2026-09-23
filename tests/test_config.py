@@ -22,6 +22,4 @@ def test_config_requires_email() -> None:
 
 def test_config_requires_password() -> None:
     with pytest.raises(msgspec.ValidationError):
-        msgspec.convert(
-            {"email": "user@example.com"}, type=SerializdListProviderConfig
-        )
+        msgspec.convert({"email": "user@example.com"}, type=SerializdListProviderConfig)

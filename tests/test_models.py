@@ -6,7 +6,6 @@ from anibridge.providers.list.serializd.models import (
     DiaryResponse,
     EpisodeLogAddResponse,
     LoginResponse,
-    NextEpisodeForUser,
     ProfileStatsResponse,
     ReviewAddResponse,
     SeasonDetail,

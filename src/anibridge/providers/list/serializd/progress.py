@@ -45,7 +45,7 @@ class DiaryIndex:
     diary once and check client-side.
     """
 
-    def __init__(self, client: "SerializdClient", username: str) -> None:
+    def __init__(self, client: SerializdClient, username: str) -> None:
         """Construct the index for a given client/username, unbuilt until needed."""
         self._client = client
         self._username = username

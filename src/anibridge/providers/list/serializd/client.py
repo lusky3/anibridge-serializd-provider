@@ -115,9 +115,7 @@ class SerializdClient:
             await self._ensure_authenticated()
 
         session = await self._get_session()
-        async with session.request(
-            method, path, params=params, json=json
-        ) as response:
+        async with session.request(method, path, params=params, json=json) as response:
             if response.status == 401 and authed and _retry_on_401:
                 self.log.debug("Serializd session expired, re-authenticating")
                 self._token = None
@@ -260,9 +258,7 @@ class SerializdClient:
 
     async def get_show_progress(self, show_id: int) -> NextEpisodeForUser | None:
         """Return the next unwatched episode, or None if fully watched/untouched."""
-        data = await self._make_request(
-            "GET", f"/mobile/page/show_v2_part_2/{show_id}"
-        )
+        data = await self._make_request("GET", f"/mobile/page/show_v2_part_2/{show_id}")
         return msgspec.convert(data, type=ShowProgressResponse).nextEpisodeForUser
 
     async def get_user_diary(self, username: str, page: int = 1) -> DiaryResponse:

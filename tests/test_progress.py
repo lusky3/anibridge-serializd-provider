@@ -1,6 +1,6 @@
 """Tests for progress/status derivation and the diary index."""
 
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from anibridge.list import ListStatus
@@ -14,6 +14,9 @@ from anibridge.providers.list.serializd.progress import (
     DiaryIndex,
     derive_progress_and_status,
 )
+
+if TYPE_CHECKING:
+    from anibridge.providers.list.serializd.client import SerializdClient
 
 
 def _next_episode(number: int) -> NextEpisodeForUser:
@@ -72,9 +75,7 @@ class _FakeDiaryClient:
 
     async def get_user_diary(self, username: str, page: int = 1) -> DiaryResponse:
         self.calls.append(page)
-        return DiaryResponse(
-            reviews=self._pages[page - 1], totalPages=len(self._pages)
-        )
+        return DiaryResponse(reviews=self._pages[page - 1], totalPages=len(self._pages))
 
 
 def _entry(show_id: int) -> DiaryEntry:
@@ -83,9 +84,7 @@ def _entry(show_id: int) -> DiaryEntry:
 
 @pytest.mark.asyncio
 async def test_diary_index_paginates_through_every_page() -> None:
-    fake = _FakeDiaryClient(
-        pages=[[_entry(1)], [_entry(2)], [_entry(3)]]
-    )
+    fake = _FakeDiaryClient(pages=[[_entry(1)], [_entry(2)], [_entry(3)]])
     index = DiaryIndex(cast("SerializdClient", fake), "user")
 
     assert await index.contains(3) is True

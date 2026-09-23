@@ -4,12 +4,10 @@ import asyncio
 from logging import getLogger
 from typing import Any, cast
 
-import aiohttp
 import pytest
 from anibridge.utils.types import ProviderLogger
 
 from anibridge.providers.list.serializd.client import (
-    BASE_URL,
     SerializdAPIError,
     SerializdClient,
 )
@@ -25,7 +23,7 @@ class _StubResponse:
         self._payload = payload or {}
         self._text = text
 
-    async def __aenter__(self) -> "_StubResponse":
+    async def __aenter__(self) -> _StubResponse:
         # Force a genuine cooperative task-switch point here. Without this,
         # none of the stub coroutines in this module ever truly suspend, so
         # asyncio.gather's tasks never actually interleave - the first task
@@ -78,7 +76,7 @@ def _install_stub_session(
     async def _get_session() -> _StubSession:
         return stub
 
-    client._get_session = _get_session  # type: ignore[method-assign]
+    client._get_session = _get_session  # ty: ignore[invalid-assignment]
     return stub
 
 
@@ -86,7 +84,11 @@ def _install_stub_session(
 async def test_login_success_sets_token_and_username(client: SerializdClient) -> None:
     _install_stub_session(
         client,
-        [_StubResponse(status=200, payload={"username": "chaoszero112", "token": "tok"})],
+        [
+            _StubResponse(
+                status=200, payload={"username": "chaoszero112", "token": "tok"}
+            )
+        ],
     )
     await client.initialize()
     assert client.username == "chaoszero112"
@@ -118,7 +120,10 @@ async def test_expired_token_triggers_one_relogin_and_retry(
             _StubResponse(
                 status=200, payload={"username": "chaoszero112", "token": "fresh-token"}
             ),
-            _StubResponse(status=200, payload={"id": 1396, "name": "Breaking Bad", "seasons": []}),
+            _StubResponse(
+                status=200,
+                payload={"id": 1396, "name": "Breaking Bad", "seasons": []},
+            ),
         ],
     )
     show = await client.get_show(1396)
@@ -176,7 +181,7 @@ async def test_concurrent_requests_during_expiry_relogin_only_once(
     async def _get_session() -> _DynamicStubSession:
         return stub
 
-    client._get_session = _get_session  # type: ignore[method-assign]
+    client._get_session = _get_session  # ty: ignore[invalid-assignment]
 
     results = await asyncio.gather(client.get_show(1), client.get_show(2))
     assert {r.id for r in results} == {1, 2}
