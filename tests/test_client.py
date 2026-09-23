@@ -1,5 +1,6 @@
 """Tests for the Serializd API client."""
 
+import asyncio
 from logging import getLogger
 from typing import Any, cast
 
@@ -25,6 +26,13 @@ class _StubResponse:
         self._text = text
 
     async def __aenter__(self) -> "_StubResponse":
+        # Force a genuine cooperative task-switch point here. Without this,
+        # none of the stub coroutines in this module ever truly suspend, so
+        # asyncio.gather's tasks never actually interleave - the first task
+        # runs to full completion before the second one starts at all, and
+        # the concurrency test below would pass even with a broken auth
+        # lock. This is the standard idiom for forcing a real yield.
+        await asyncio.sleep(0)
         return self
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
@@ -161,8 +169,6 @@ class _DynamicStubSession:
 async def test_concurrent_requests_during_expiry_relogin_only_once(
     client: SerializdClient,
 ) -> None:
-    import asyncio
-
     client._token = "stale-token"
     client.username = "chaoszero112"
     stub = _DynamicStubSession()
