@@ -1,1 +1,0 @@
-"""AniBridge namespace package."""
