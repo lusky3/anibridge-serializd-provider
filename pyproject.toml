@@ -1,0 +1,67 @@
+[project]
+name = "anibridge-serializd-provider"
+version = "0.1.0a1"
+description = "Serializd provider for the AniBridge project."
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+requires-python = ">=3.14"
+
+keywords = ["anibridge", "serializd"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "aiohttp>=3.13.3",
+    "anibridge-list-base>=0.2.0",
+    "anibridge-utils>=0.2.0",
+    "msgspec>=0.21.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/lusky3/anibridge-serializd-provider"
+Repository = "https://github.com/lusky3/anibridge-serializd-provider"
+
+[tool.ruff]
+indent-width = 4
+line-length = 88
+
+[tool.ruff.format]
+docstring-code-format = true
+indent-style = "space"
+quote-style = "double"
+
+[tool.ruff.lint]
+select = ["B", "D", "DOC", "E", "F", "I", "RUF", "SIM", "UP", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--cov=src"
+asyncio_mode = "auto"
+
+[tool.uv.build-backend]
+module-name = "anibridge"
+namespace = true
+
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.5",
+    "ty>=0.0.22",
+]

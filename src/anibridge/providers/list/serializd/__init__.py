@@ -1,0 +1,1 @@
+"""Serializd provider for AniBridge."""
