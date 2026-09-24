@@ -69,11 +69,16 @@ class SerializdClient:
         self._auth_lock = asyncio.Lock()
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create the aiohttp session, recreated whenever the token changes."""
+        """Get or create the aiohttp session.
+
+        The session carries no auth state of its own — the Authorization
+        header is computed per-request in `_make_request` — so it never
+        needs to be closed/recreated on login or re-login, and stays valid
+        for any request already in flight when another request refreshes
+        the token.
+        """
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                base_url=BASE_URL, headers=_default_headers(self._token)
-            )
+            self._session = aiohttp.ClientSession(base_url=BASE_URL)
         return self._session
 
     async def close(self) -> None:
@@ -86,24 +91,41 @@ class SerializdClient:
         await self._ensure_authenticated()
 
     async def _ensure_authenticated(self) -> None:
-        """Log in if there is no cached token, guarded against concurrent re-login."""
+        """Log in if there is no token yet, guarded against concurrent re-login."""
         if self._token is not None:
             return
         async with self._auth_lock:
             if self._token is not None:
                 return
-            data = await self._make_request(
-                "POST",
-                "/api/login",
-                json={"email": self._email, "password": self._password},
-                authed=False,
-            )
-            parsed = msgspec.convert(data, type=LoginResponse)
-            self._token = parsed.token
-            self.username = parsed.username
-            if self._session and not self._session.closed:
-                await self._session.close()
-            self._session = None
+            await self._login()
+
+    async def _refresh_after_401(self, stale_token: str | None) -> None:
+        """Re-login after a 401, but only if no concurrent request already did.
+
+        `stale_token` is the token the request that got the 401 was actually
+        sent with. If `self._token` no longer equals it, another concurrent
+        request already refreshed the token after this one was sent but
+        before it got here — in that case there is nothing to do, and
+        clearing `self._token` unconditionally would wipe out that fresh
+        token and force a needless second login.
+        """
+        async with self._auth_lock:
+            if self._token != stale_token:
+                return
+            self._token = None
+            await self._login()
+
+    async def _login(self) -> None:
+        """Perform the actual login call and store the resulting token."""
+        data = await self._make_request(
+            "POST",
+            "/api/login",
+            json={"email": self._email, "password": self._password},
+            authed=False,
+        )
+        parsed = msgspec.convert(data, type=LoginResponse)
+        self._token = parsed.token
+        self.username = parsed.username
 
     async def _make_request(
         self,
@@ -119,12 +141,15 @@ class SerializdClient:
         if authed and self._token is None:
             await self._ensure_authenticated()
 
+        request_token = self._token if authed else None
         session = await self._get_session()
-        async with session.request(method, path, params=params, json=json) as response:
+        headers = _default_headers(request_token)
+        async with session.request(
+            method, path, params=params, json=json, headers=headers
+        ) as response:
             if response.status == 401 and authed and _retry_on_401:
                 self.log.debug("Serializd session expired, re-authenticating")
-                self._token = None
-                await self._ensure_authenticated()
+                await self._refresh_after_401(request_token)
                 return await self._make_request(
                     method,
                     path,

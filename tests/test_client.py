@@ -189,6 +189,28 @@ async def test_concurrent_requests_during_expiry_relogin_only_once(
     assert stub.login_count == 1
 
 
+@pytest.mark.asyncio
+async def test_late_401_does_not_clobber_a_token_already_refreshed(
+    client: SerializdClient,
+) -> None:
+    """A 401 for a request sent with an already-superseded token must not
+    wipe out a token another request already refreshed, and must not
+    trigger a second login.
+    """
+    client._token = "stale-token"
+    client.username = "chaoszero112"
+    stub = _install_stub_session(client, [])
+    # Simulate another request having already refreshed the token by the
+    # time this request's 401 is handled: call the retry path directly with
+    # a stale_token that no longer matches client._token. No HTTP call
+    # should happen at all - the mismatch alone is enough to skip re-login.
+    client._token = "fresh-token"
+    await client._refresh_after_401(stale_token="stale-token")
+
+    assert client._token == "fresh-token"
+    assert len(stub.calls) == 0
+
+
 def test_default_headers_always_present() -> None:
     from anibridge.providers.list.serializd.client import _default_headers
 

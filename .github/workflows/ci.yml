@@ -26,7 +26,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+          # Only honor a manually-supplied ref when the trigger itself
+          # isn't already a release tag - otherwise a workflow_dispatch run
+          # manually pointed at a tag could lint/test a different commit
+          # than the release-gate/publish jobs (which always check out
+          # github.ref for a tag push) actually ship.
+          ref: ${{ (github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/')) && github.event.inputs.ref || github.ref }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
@@ -47,7 +52,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+          # See the Lint job's checkout step for why inputs.ref is ignored
+          # when the trigger is already a release tag.
+          ref: ${{ (github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/')) && github.event.inputs.ref || github.ref }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0

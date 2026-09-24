@@ -436,6 +436,79 @@ def test_user_rating_rejects_out_of_range_values() -> None:
         entry.user_rating = -1
 
 
+def test_setters_are_no_ops_when_the_value_is_unchanged() -> None:
+    # Re-assigning the same value must not mark the field dirty, so
+    # update_entry doesn't re-write things that never actually changed
+    # (avoids, among other things, a duplicate non-idempotent completion
+    # write every sync for an already-complete, already-rated show).
+    from anibridge.providers.list.serializd.list import SerializdListEntry
+
+    show = _show(1)
+    entry = SerializdListEntry(
+        cast("SerializdListProvider", object()),
+        show,
+        progress=5,
+        status=ListStatus.CURRENT,
+        rating=8,
+        review_text="fine",
+    )
+
+    entry.progress = 5
+    entry.user_rating = 80
+    entry.review = "fine"
+
+    assert entry._changed_fields == set()
+
+
+def test_setters_still_mark_dirty_when_the_value_actually_changes() -> None:
+    from anibridge.providers.list.serializd.list import SerializdListEntry
+
+    show = _show(1)
+    entry = SerializdListEntry(
+        cast("SerializdListProvider", object()),
+        show,
+        progress=5,
+        status=ListStatus.CURRENT,
+        rating=8,
+        review_text="fine",
+    )
+
+    entry.progress = 6
+    entry.user_rating = 90
+    entry.review = "great"
+
+    assert entry._changed_fields == {"progress", "user_rating", "review"}
+
+
+@pytest.mark.asyncio
+async def test_update_entry_reprocessing_an_unchanged_completed_entry_is_a_noop(
+    provider: SerializdListProvider, fake_client: _FakeSerializdClient
+) -> None:
+    # A completion write followed by re-processing the SAME already-read-
+    # back entry (no field actually changed) must not fire a second
+    # add_review call - the old log_show-based write was naturally
+    # idempotent; the diary-creating add_review write is not, so this now
+    # relies on the setter equality guard instead.
+    fake_client.shows[1396] = _show(1396, episode_count=10)
+    fake_client.progress[1396] = NextEpisodeForUser(
+        episodeId=1, episodeNumber=1, name="x", seasonNumber=1
+    )
+    entry = await provider.get_entry("1396")
+    assert entry is not None
+    entry.progress = 10
+    await provider.update_entry("1396", entry)
+    assert len(fake_client.review_calls) == 1
+
+    completed_entry = await provider.get_entry("1396")
+    assert completed_entry is not None
+    assert completed_entry.progress == 10
+
+    completed_entry.progress = 10  # same value the entry already has
+    await provider.update_entry("1396", completed_entry)
+
+    assert len(fake_client.review_calls) == 1
+
+
 @pytest.mark.asyncio
 async def test_delete_entry_calls_unlog_show(
     provider: SerializdListProvider, fake_client: _FakeSerializdClient

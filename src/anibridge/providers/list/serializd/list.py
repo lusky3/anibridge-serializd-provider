@@ -118,6 +118,8 @@ class SerializdListEntry(ListEntry["SerializdListProvider"]):
     def progress(self, value: int | None) -> None:
         if value is not None and value < 0:
             raise ValueError("Progress cannot be negative.")
+        if value == self._progress:
+            return
         self._progress = value
         self._changed_fields.add("progress")
 
@@ -139,6 +141,8 @@ class SerializdListEntry(ListEntry["SerializdListProvider"]):
 
     @review.setter
     def review(self, value: str | None) -> None:
+        if value == self._review_text:
+            return
         self._review_text = value
         self._changed_fields.add("review")
 
@@ -166,6 +170,8 @@ class SerializdListEntry(ListEntry["SerializdListProvider"]):
 
     @user_rating.setter
     def user_rating(self, value: int | None) -> None:
+        if value == self.user_rating:
+            return
         if value is None:
             self._rating = None
             self._changed_fields.add("user_rating")
@@ -282,13 +288,17 @@ class SerializdListProvider(ListProvider):
         next_episode = await self._client.get_show_progress(show_id)
 
         assert self._diary_index is not None
-        latest_entry = await self._diary_index.latest_entry(show_id)
+        has_diary_entry = await self._diary_index.contains(show_id)
+        # Rating/review are read back from the show-level entry specifically
+        # (not just "latest of any scope") so a season/episode-level log
+        # can't shadow an earlier, still-current show-level rating.
+        show_level_entry = await self._diary_index.show_level_entry(show_id)
 
         progress, status = derive_progress_and_status(
             total_episodes=_total_episodes(show),
             next_episode=next_episode,
             ordered_seasons=_ordered_seasons(show),
-            has_diary_entry=latest_entry is not None,
+            has_diary_entry=has_diary_entry,
         )
 
         return SerializdListEntry(
@@ -296,8 +306,10 @@ class SerializdListProvider(ListProvider):
             show,
             progress=progress,
             status=status,
-            rating=latest_entry.rating if latest_entry is not None else None,
-            review_text=(latest_entry.reviewText if latest_entry is not None else None),
+            rating=show_level_entry.rating if show_level_entry is not None else None,
+            review_text=(
+                show_level_entry.reviewText if show_level_entry is not None else None
+            ),
         )
 
     async def update_entry(

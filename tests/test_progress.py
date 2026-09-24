@@ -130,6 +130,8 @@ def _entry(
     date_added: str = "2026-01-01T00:00:00Z",
     rating: int | None = None,
     review_text: str = "",
+    season_id: int | None = None,
+    episode_number: int | None = None,
 ) -> DiaryEntry:
     return DiaryEntry(
         id=entry_id,
@@ -137,6 +139,8 @@ def _entry(
         dateAdded=date_added,
         rating=rating,
         reviewText=review_text,
+        seasonId=season_id,
+        episodeNumber=episode_number,
     )
 
 
@@ -211,3 +215,44 @@ async def test_diary_index_latest_entry_picks_the_most_recent_by_date() -> None:
     assert entry is not None
     assert entry.id == 2
     assert entry.rating == 9
+
+
+@pytest.mark.asyncio
+async def test_show_level_entry_ignores_later_season_scoped_entry() -> None:
+    # A show-level rating, followed by a newer season-level episode log (no
+    # rating of its own) - show_level_entry must still surface the earlier
+    # show-level rating rather than being shadowed by the newer but
+    # differently-scoped entry. contains()/latest_entry() still see the show
+    # as touched via the season-level entry.
+    show_level = _entry(
+        1, entry_id=1, date_added="2026-01-01T00:00:00Z", rating=8, review_text="great"
+    )
+    season_level = _entry(
+        1,
+        entry_id=2,
+        date_added="2026-02-01T00:00:00Z",
+        season_id=101,
+        episode_number=3,
+    )
+    fake = _FakeDiaryClient(pages=[[show_level, season_level]])
+    index = DiaryIndex(cast("SerializdClient", fake), "user")
+
+    show_level_result = await index.show_level_entry(1)
+    assert show_level_result is not None
+    assert show_level_result.id == 1
+    assert show_level_result.rating == 8
+
+    assert await index.contains(1) is True
+    latest = await index.latest_entry(1)
+    assert latest is not None
+    assert latest.id == 2
+
+
+@pytest.mark.asyncio
+async def test_show_level_entry_none_when_only_season_scoped_entries_exist() -> None:
+    season_level = _entry(1, season_id=101, episode_number=1)
+    fake = _FakeDiaryClient(pages=[[season_level]])
+    index = DiaryIndex(cast("SerializdClient", fake), "user")
+
+    assert await index.show_level_entry(1) is None
+    assert await index.contains(1) is True
