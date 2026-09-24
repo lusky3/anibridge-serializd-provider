@@ -21,3 +21,6 @@ htmlcov/
 .idea/
 .vscode/
 *.swp
+
+# Implementation plans are working artifacts, not committed (per project convention)
+docs/superpowers/plans/
